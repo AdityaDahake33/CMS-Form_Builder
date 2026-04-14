@@ -263,9 +263,19 @@ const Sidebar: React.FC<Props> = ({ onClose, onNav }) => {
                         <NavLink to="/organization/addOrganization" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} onClick={onNav}>
                             <i className="bi bi-building me-2" /> Organization
                         </NavLink>
+                        <NavLink to="/organization/DbCluster" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} onClick={onNav}>
+                            <i className="bi bi-database me-2" /> DB Cluster
+                        </NavLink>
+                        <NavLink to="/organization/Logs" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} onClick={onNav}>
+                            <i className="bi bi-list me-2" /> Logs
+                        </NavLink>
+                        <NavLink to="/organization/Billing" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} onClick={onNav}>
+                            <i className="bi bi-credit-card me-2" /> Billing
+                        </NavLink>
                         <button className="btn btn-danger mt-2" onClick={logout} type="button">
                             Logout
                         </button>
+
                     </>
                 )}
 
