@@ -646,15 +646,14 @@ type NoticeStatus = "Draft" | "Published" | "Archived";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const statusBadge = (status: NoticeStatus | string) => {
-    const s = status === "Draft" 
-        ? { bg: "rgba(255,193,7,0.15)", color: "#ffc107", icon: "bi-pencil-square" }
+    const badgeClass = status === "Draft" 
+        ? "badge text-bg-warning rounded-pill"
         : status === "Archived"
-        ? { bg: "rgba(108,117,125,0.2)", color: "#adb5bd", icon: "bi-archive" }
-        : { bg: "rgba(25,135,84,0.15)", color: "#3dd68c", icon: "bi-broadcast" };
+        ? "badge text-bg-secondary rounded-pill"
+        : "badge text-bg-success rounded-pill";
 
     return (
-        <span style={{ background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <i className={`bi ${s.icon}`} style={{ fontSize: 10 }} />
+        <span className={badgeClass}>
             {status || "Published"}
         </span>
     );
@@ -662,17 +661,14 @@ const statusBadge = (status: NoticeStatus | string) => {
 
 const completionBar = (done: number, total: number) => {
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    const color = pct === 100 ? "#198754" : pct >= 60 ? "#ffc107" : "#dc3545";
     return (
         <div>
-            <div className="d-flex justify-content-between mb-1">
-                <span style={{ fontSize: 11, color: "#adb5bd" }}>
-                    {done}/{total} sections
-                </span>
-                <span style={{ fontSize: 11, color }}>{pct}%</span>
+            <div className="d-flex align-items-center justify-content-between mb-2">
+                <div className="text-secondary small">{done}/{total} sections</div>
+                <div className="fw-semibold">{pct}%</div>
             </div>
-            <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
-                <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, transition: "width 0.3s" }} />
+            <div className="progress" role="progressbar" aria-label={`${pct}% complete`}>
+                <div className="progress-bar" style={{ width: `${pct}%` }} />
             </div>
         </div>
     );
@@ -773,15 +769,16 @@ const PrivacyNoticeList: React.FC<Props> = ({ onCreateNew, onEdit }) => {
                 </div>
             )}
 
-            <div className="container-fluid">
+            <div className="container-fluid app-shell">
+                <div className="row g-0">
                 {/* Header */}
                 <div className="panel mb-3">
                     <div className="panel-head p-3 d-flex flex-wrap gap-3 align-items-center justify-content-between">
                         <div>
-                            <div className="h5 mb-1 d-flex align-items-center gap-2">
-                                <i className="bi bi-files text-primary" /> Privacy Notices
+                            <div className="h5 mb-1">Privacy Notices</div>
+                            <div className="text-secondary small">
+                                Manage DPDP Act, 2023 compliant privacy notices
                             </div>
-                            <div className="text-secondary small">Manage DPDP Act, 2023 compliant privacy notices</div>
                         </div>
                         <div className="d-flex gap-2">
                             <button className="btn btn-sm btn-outline-secondary" onClick={loadNotices}>
@@ -913,6 +910,7 @@ const PrivacyNoticeList: React.FC<Props> = ({ onCreateNew, onEdit }) => {
                             </table>
                         </div>
                     )}
+                </div>
                 </div>
             </div>
         </>
