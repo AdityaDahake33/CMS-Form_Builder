@@ -1143,395 +1143,731 @@
 
 // export default MyFormDetails;
 
+/**
+ * src/formbuilder/myFormDetail.tsx
+ *
+ * PUBLIC standalone page for users to:
+ *   1. View their previously submitted form data (pre-filled)
+ *   2. Update their data  →  POST /api/Home/updateFormResponse
+ *   3. Send Consent Withdrawal Request  →  POST /api/Home/addConsentRemoveRequest
+ *
+ * Route (standalone, no sidebar):
+ *   /myFormDetails?id={responseId}
+ *
+ * API used:
+ *   GET  /api/Form/getFormResponseById?Id={responseId}   ← fetch pre-filled data
+ *   POST /api/Home/updateFormResponse                    ← update submission
+ *   POST /api/Home/addConsentRemoveRequest               ← withdraw consent
+ *   POST /api/Home/SendOTPMail                           ← OTP for auth
+ */
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useProject } from "../Context/projectContext";
 import { PopupAlert } from "../Components/alert";
-import { updateFormResponseData } from "../Api/updateFormResponse";
-import { addConsentRemoveRequest } from "../Api/addRemoveConsentRequest";
-import { sendOtpMail } from "../Api/sendMailOtp";
+import { getFormResponseByResponseId } from "../Api/getFormResponseByResponseId";
+import { updateFormResponseData }       from "../Api/updateFormResponse";
+import { addConsentRemoveRequest }       from "../Api/addRemoveConsentRequest";
+import { sendOtpMail }                  from "../Api/sendMailOtp";
+import type { FormResponseByResponseIdParsed } from "../Api/getFormResponseByResponseId";
 
-/* ================= TYPES ================= */
-type FieldType = "text" | "email" | "phone" | "number" | "dropdown" | "radio" | "checkbox" | "date" | "upload" | "terms";
+/* ─── Types ──────────────────────────────────────────────────────── */
+
+type FieldType =
+    | "text" | "email" | "phone" | "number"
+    | "dropdown" | "radio" | "checkbox"
+    | "date" | "upload" | "terms";
 
 type BuilderField = {
-    id: string;
-    type: FieldType;
-    label: string;
-    placeholder?: string;
-    required: boolean;
-    validation?: { minLength?: number; maxLength?: number; errorMessage?: string; pattern?: string; };
-    description?: string;
-    descriptionAuto?: boolean;
+    id: string; type: FieldType; label: string;
+    placeholder?: string; required: boolean;
+    validation?: { minLength?: number; maxLength?: number; errorMessage?: string; pattern?: string };
+    description?: string; descriptionAuto?: boolean;
     options?: { id: string; label: string; value?: string }[];
     numberConfig?: { min?: number; max?: number };
     uploadConfig?: { accept?: string; multiple?: boolean; maxSizeMB?: number };
     termsConfig?: { text?: string };
+    locked?: boolean;
     value?: any;
 };
 
-/* ================= VALIDATION HELPERS ================= */
-const isPasswordField = (f: BuilderField) => `${f.id} ${f.label} ${f.placeholder ?? ""}`.toLowerCase().includes("password");
-const isPhoneField = (f: BuilderField) => {
-    const text = `${f.id} ${f.label} ${f.placeholder ?? ""}`.toLowerCase();
-    if (text.includes("pincode") || text.includes("pin code") || text.includes("postal") || text.includes("zip")) return false;
-    return f.type === "phone" || text.includes("mobile") || text.includes("phone");
+type Meta = { title?: string; subtitle?: string; category?: string };
+
+type FormResponseSchema = {
+    id?: string; meta?: Meta; fields?: BuilderField[];
+    createdAt?: string; updatedAt?: string; submittedAt?: string;
 };
-const isEmailField = (f: BuilderField) => f.type === "email" || `${f.id} ${f.label}`.toLowerCase().includes("email");
+
+/* ─── Validation ─────────────────────────────────────────────────── */
+
+const isPasswordField = (f: BuilderField) => {
+    const t = `${f.id} ${f.label} ${f.placeholder ?? ""}`.toLowerCase();
+    return t.includes("password") || t.includes("pass word") || t.includes("pwd");
+};
+const isPhoneField = (f: BuilderField) => {
+    const t = `${f.id} ${f.label} ${f.placeholder ?? ""}`.toLowerCase();
+    if (t.includes("pincode") || t.includes("pin code") || t.includes("postal") || t.includes("zip")) return false;
+    return f.type === "phone" || t.includes("mobile") || t.includes("phone") || t.includes("contact");
+};
+const isEmailField = (f: BuilderField) => {
+    const t = `${f.id} ${f.label} ${f.placeholder ?? ""}`.toLowerCase();
+    return f.type === "email" || t.includes("email") || t.includes("e-mail");
+};
+const isPincodeField = (f: BuilderField) => {
+    const t = `${f.id} ${f.label} ${f.placeholder ?? ""}`.toLowerCase();
+    return t.includes("pincode") || t.includes("pin code") || t.includes("postal") || t.includes("zip");
+};
 
 const validateField = (f: BuilderField, value: any): string => {
-    const isEmpty = value === null || value === undefined || (typeof value === "string" && value.trim() === "") || (Array.isArray(value) && value.length === 0) || (f.type === "terms" && value === false);
-    if (f.required && isEmpty) return f.validation?.errorMessage?.trim() || "This field is required.";
-    if (isEmpty) return "";
+    const empty =
+        value === null || value === undefined ||
+        (typeof value === "string" && !value.trim()) ||
+        (Array.isArray(value) && !value.length) ||
+        (typeof value === "boolean" && !value && f.type === "terms");
 
-    const strValue = typeof value === "string" ? value.trim() : value;
+    if (f.required && empty) return f.validation?.errorMessage?.trim() || "This field is required.";
+    if (empty) return "";
 
-    if (isEmailField(f) && typeof strValue === "string") {
-        const regex = f.validation?.pattern ? new RegExp(f.validation.pattern) : /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!regex.test(strValue)) return f.validation?.errorMessage?.trim() || "Invalid email address.";
+    const s = typeof value === "string" ? value.trim() : value;
+
+    if (isEmailField(f) && typeof s === "string") {
+        const rx = f.validation?.pattern ? new RegExp(f.validation.pattern) : /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!rx.test(s)) return f.validation?.errorMessage?.trim() || "Please enter a valid email address.";
     }
-    if (isPhoneField(f) && typeof strValue === "string") {
-        if (!/^\d{10}$/.test(strValue.replace(/\D/g, ""))) return f.validation?.errorMessage?.trim() || "Invalid 10-digit mobile number.";
+    if (isPincodeField(f) && typeof s === "string") {
+        if (!/^\d{6}$/.test(s.replace(/\D/g, ""))) return "Please enter a valid 6-digit pincode.";
+        return "";
+    }
+    if (isPhoneField(f) && typeof s === "string") {
+        if (!/^\d{10}$/.test(s.replace(/\D/g, ""))) return "Please enter a valid 10-digit mobile number.";
+        return "";
+    }
+    if (isPasswordField(f) && typeof s === "string") {
+        if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#()_\-+={}[\]:;"'<>,./\\|`~]).{8,}$/.test(s))
+            return "Password must be ≥8 chars with upper, lower, number & special char.";
+        return "";
+    }
+    if (f.type === "number" && s !== "") {
+        const n = Number(s);
+        if (isNaN(n)) return "Please enter a valid number.";
+        if (typeof f.numberConfig?.min === "number" && n < f.numberConfig.min) return `Value must be at least ${f.numberConfig.min}.`;
+        if (typeof f.numberConfig?.max === "number" && n > f.numberConfig.max) return `Value must be at most ${f.numberConfig.max}.`;
+        return "";
+    }
+    if (typeof s === "string") {
+        if (f.validation?.minLength && s.length < f.validation.minLength) return `Minimum ${f.validation.minLength} characters required.`;
+        if (f.validation?.maxLength && s.length > f.validation.maxLength) return `Maximum ${f.validation.maxLength} characters allowed.`;
     }
     return "";
 };
 
-/* ================= FIELD RENDER (LIGHT THEME) ================= */
-const renderField = (f: BuilderField, value: any, setValue: (v: any) => void, onBlur?: () => void, error?: string) => {
-    const inputStyle = { background: "#ffffff", border: `1px solid ${error ? "#f86e7a" : "#cbd5e1"}`, color: "#1e293b", borderRadius: "8px" };
+/* ─── Field renderer ─────────────────────────────────────────────── */
+
+const ds = { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#f8f9fa" };
+
+const renderField = (
+    f: BuilderField,
+    value: any,
+    setValue: (v: any) => void,
+    onBlur?: () => void,
+    error?: string
+) => {
+    const cc = `form-control ${error ? "is-invalid" : ""}`;
+    const sc = `form-select ${error ? "is-invalid" : ""}`;
 
     switch (f.type) {
-        case "dropdown":
-            return (
-                <select className="form-select shadow-none" style={inputStyle} required={f.required} value={value ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={onBlur}>
-                    <option value="">{f.placeholder || "Select..."}</option>
-                    {(f.options ?? []).map((o) => <option key={o.id} value={o.value ?? o.label}>{o.label}</option>)}
-                </select>
-            );
-        case "radio":
-            return (
-                <div className="mt-2 d-flex flex-column gap-2">
-                    {(f.options ?? []).map((o) => {
-                        const v = o.value ?? o.label;
-                        return (
-                            <label key={o.id} className="form-check d-flex align-items-center gap-2 mb-0" style={{ cursor: "pointer" }}>
-                                <input className="form-check-input mt-0" type="radio" name={f.id} value={v} checked={value === v} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} style={{ transform: "scale(1.1)" }} />
-                                <span className="text-dark" style={{ fontSize: "0.95rem" }}>{o.label}</span>
-                            </label>
-                        );
-                    })}
-                </div>
-            );
-        case "checkbox":
-            return (
-                <div className="mt-2 d-flex flex-column gap-2">
-                    {(f.options ?? []).map((o) => {
-                        const v = o.value ?? o.label;
-                        const arr: string[] = Array.isArray(value) ? value : [];
-                        return (
-                            <label key={o.id} className="form-check d-flex align-items-center gap-2 mb-0" style={{ cursor: "pointer" }}>
-                                <input className="form-check-input mt-0" type="checkbox" checked={arr.includes(v)} onChange={(e) => setValue(e.target.checked ? [...arr, v] : arr.filter((x) => x !== v))} onBlur={onBlur} style={{ transform: "scale(1.1)" }} />
-                                <span className="text-dark" style={{ fontSize: "0.95rem" }}>{o.label}</span>
-                            </label>
-                        );
-                    })}
-                </div>
-            );
-        case "terms":
-            return (
-                <label className="d-flex align-items-start gap-3 mt-1" style={{ cursor: "pointer" }}>
-                    <input type="checkbox" className="form-check-input mt-1" required={f.required} checked={!!value} onChange={(e) => setValue(e.target.checked)} onBlur={onBlur} style={{ transform: "scale(1.2)" }} />
-                    <span className="text-dark" style={{ lineHeight: 1.5, fontSize: "0.9rem" }}>{f.termsConfig?.text ?? "I agree to the terms"}</span>
-                </label>
-            );
-        default:
-            return (
-                <input
-                    className="form-control shadow-none"
-                    type={f.type === "number" ? "number" : f.type === "email" ? "email" : f.type === "date" ? "date" : isPasswordField(f) ? "password" : "text"}
-                    placeholder={f.placeholder || ""}
-                    required={f.required}
-                    value={value ?? ""}
-                    onChange={(e) => {
-                        if (f.type === "phone") setValue(e.target.value.replace(/\D/g, "").slice(0, f.validation?.maxLength || 10));
-                        else setValue(e.target.value);
-                    }}
-                    onBlur={onBlur}
-                    style={inputStyle}
-                />
-            );
+        case "dropdown": return (
+            <select className={sc} required={f.required} value={value ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} style={ds}>
+                <option value="" style={{ color: "#000" }}>{f.placeholder || "Select..."}</option>
+                {(f.options ?? []).map((o) => <option key={o.id} value={o.value ?? o.label} style={{ color: "#000" }}>{o.label}</option>)}
+            </select>
+        );
+        case "radio": return (
+            <div className="mt-2">
+                {(f.options ?? []).map((o) => {
+                    const v = o.value ?? o.label;
+                    return (
+                        <div key={o.id} className="form-check mb-2">
+                            <input className={`form-check-input ${error ? "is-invalid" : ""}`} type="radio" name={f.id} value={v} checked={value === v} required={f.required} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} />
+                            <label className="form-check-label text-light">{o.label}</label>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+        case "checkbox": return (
+            <div className="mt-2">
+                {(f.options ?? []).map((o) => {
+                    const v = o.value ?? o.label;
+                    const arr: string[] = Array.isArray(value) ? value : [];
+                    return (
+                        <div key={o.id} className="form-check mb-2">
+                            <input className={`form-check-input ${error ? "is-invalid" : ""}`} type="checkbox" checked={arr.includes(v)} onChange={(e) => { if (e.target.checked) setValue([...arr, v]); else setValue(arr.filter((x) => x !== v)); }} onBlur={onBlur} />
+                            <label className="form-check-label text-light">{o.label}</label>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+        case "number":  return <input className={cc} type="number" placeholder={f.placeholder || ""} min={f.numberConfig?.min} max={f.numberConfig?.max} required={f.required} value={value ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} style={ds} />;
+        case "email":   return <input className={cc} type="email" placeholder={f.placeholder || ""} required={f.required} value={value ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} style={ds} />;
+        case "phone":   return <input className={cc} type="text" inputMode="numeric" placeholder={f.placeholder || ""} required={f.required} value={value ?? ""} onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); const mx = f.validation?.maxLength; setValue(mx ? d.slice(0, mx) : d); }} onBlur={onBlur} style={ds} />;
+        case "date":    return <input className={cc} type="date" required={f.required} value={value ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} style={ds} />;
+        case "upload":  return <input className={cc} type="file" accept={f.uploadConfig?.accept} multiple={!!f.uploadConfig?.multiple} required={f.required} onChange={(e) => { const files = (e.target as HTMLInputElement).files; if (!files) return setValue(null); setValue(f.uploadConfig?.multiple ? Array.from(files) : files[0] ?? null); }} onBlur={onBlur} style={ds} />;
+        case "terms":   return <label className="d-flex align-items-start gap-2 text-light"><input type="checkbox" required={f.required} checked={!!value} onChange={(e) => setValue(e.target.checked)} onBlur={onBlur} className="mt-1" /><span>{f.termsConfig?.text ?? "I agree to the terms"}</span></label>;
+        default:        return <input className={cc} type={isPasswordField(f) ? "password" : "text"} placeholder={f.placeholder || ""} required={f.required} value={value ?? ""} onChange={(e) => setValue(e.target.value)} onBlur={onBlur} style={ds} />;
     }
 };
 
-/* ================= MAIN COMPONENT ================= */
+/* ─── Main Component ─────────────────────────────────────────────── */
+
 const MyFormDetails: React.FC = () => {
     const [searchParams] = useSearchParams();
-    const responseId = Number(searchParams.get("responseId") || searchParams.get("id"));
+    // Supports both ?id= and ?responseId=
+    const responseId = Number(searchParams.get("id") || searchParams.get("responseId"));
 
-    const {
-        selectedFormResponseById, selectedFormResponseByIdLoading, selectedFormResponseByIdError,
-        fetchFormResponseByResponseId, publicIP, refreshIP,
-    } = useProject();
+    /* ── Data fetching state ──────────────────────────────────────── */
+    const [record, setRecord]         = useState<FormResponseByResponseIdParsed | null>(null);
+    const [dataLoading, setDataLoading] = useState(true);
+    const [dataError, setDataError]     = useState("");
 
-    const [values, setValues] = useState<Record<string, any>>({});
+    /* ── Public IP (for update payload) ──────────────────────────── */
+    const [publicIP, setPublicIP] = useState("0.0.0.0");
+
+    /* ── Form state ───────────────────────────────────────────────── */
+    const [values, setValues]           = useState<Record<string, any>>({});
     const [initialValues, setInitialValues] = useState<Record<string, any>>({});
-    const [submitted, setSubmitted] = useState(false);
+    const [submitted, setSubmitted]     = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-    const [touched, setTouched] = useState<Record<string, boolean>>({});
+    const [touched, setTouched]         = useState<Record<string, boolean>>({});
 
-    const [confirmOpen, setConfirmOpen] = useState(false);
-    const [removeConsentConfirmOpen, setRemoveConsentConfirmOpen] = useState(false);
-    const [successOpen, setSuccessOpen] = useState(false);
-    const [dangerOpen, setDangerOpen] = useState(false);
-    const [dangerMsg, setDangerMsg] = useState("");
-    const [successTitle, setSuccessTitle] = useState("Updated!");
-    const [successMsg, setSuccessMsg] = useState("");
-
+    /* ── OTP state ────────────────────────────────────────────────── */
     const [consentTruth, setConsentTruth] = useState(false);
-    const [consentDpdp, setConsentDpdp] = useState(false);
-    const [otpServer, setOtpServer] = useState<string>("");
-    const [otpInput, setOtpInput] = useState<string>("");
-    const [otpSent, setOtpSent] = useState(false);
-    const [otpSending, setOtpSending] = useState(false);
-    const [removeConsentLoading, setRemoveConsentLoading] = useState(false);
+    const [consentDpdp,  setConsentDpdp]  = useState(false);
+    const [otpServer,    setOtpServer]    = useState("");
+    const [otpInput,     setOtpInput]     = useState("");
+    const [otpSent,      setOtpSent]      = useState(false);
+    const [otpSending,   setOtpSending]   = useState(false);
 
-    const [removeConsentRemark, setRemoveConsentRemark] = useState("");
-    const [removeConsentRemarkError, setRemoveConsentRemarkError] = useState("");
+    /* ── Modals / alerts ──────────────────────────────────────────── */
+    const [confirmUpdateOpen, setConfirmUpdateOpen] = useState(false);
+    const [consentModalOpen,  setConsentModalOpen]  = useState(false);
+    const [consentRemark,     setConsentRemark]     = useState("");
+    const [consentRemarkErr,  setConsentRemarkErr]  = useState("");
+    const [consentLoading,    setConsentLoading]    = useState(false);
 
-    const year = new Date().getFullYear();
+    const [successOpen, setSuccessOpen] = useState(false);
+    const [successTitle, setSuccessTitle] = useState("Success");
+    const [successMsg,  setSuccessMsg]  = useState("");
+    const [dangerOpen,  setDangerOpen]  = useState(false);
+    const [dangerMsg,   setDangerMsg]   = useState("Something went wrong!");
 
+    const year = useMemo(() => new Date().getFullYear(), []);
+
+    /* ── Fetch public IP ──────────────────────────────────────────── */
     useEffect(() => {
-        if (!responseId || Number.isNaN(responseId)) return;
-        fetchFormResponseByResponseId(responseId);
+        fetch("https://api.ipify.org?format=json")
+            .then((r) => r.json())
+            .then((d) => setPublicIP(d.ip || "0.0.0.0"))
+            .catch(() => {});
+    }, []);
+
+    /* ── Step 1: Fetch response data by responseId ────────────────── */
+    useEffect(() => {
+        if (!responseId || isNaN(responseId)) return;
+
+        const load = async () => {
+            setDataLoading(true);
+            setDataError("");
+            try {
+                // GET /api/Form/getFormResponseById?Id={responseId}
+                const data = await getFormResponseByResponseId(responseId);
+                if (!data) { setDataError("No response found for this ID."); return; }
+                setRecord(data);
+            } catch (err: any) {
+                setDataError(err?.message || "Failed to load form data.");
+            } finally {
+                setDataLoading(false);
+            }
+        };
+
+        load();
     }, [responseId]);
 
-    useEffect(() => { if (!publicIP) refreshIP(); }, [publicIP]);
-
-    // 👉 Deep Unwrapping of Form Response Data
-    const formObject = useMemo(() => {
-        let obj = selectedFormResponseById?.FormResponse;
-        if (typeof obj === 'string') { try { obj = JSON.parse(obj); } catch (e) { obj = {}; } }
-        return obj || {};
-    }, [selectedFormResponseById]);
-
-    const fields: BuilderField[] = formObject.fields || [];
-    const meta = formObject.meta || {};
-    const formId = selectedFormResponseById?.FormId || 0;
+    /* ── Step 2: Parse FormResponse and pre-fill values ──────────── */
+    const schema: FormResponseSchema | null = record?.FormResponse as FormResponseSchema ?? null;
+    const fields: BuilderField[]            = schema?.fields ?? [];
+    const meta: Meta                        = schema?.meta   ?? {};
+    const formId                            = record?.FormId ?? 0;
 
     useEffect(() => {
         if (!fields.length) return;
+
         const init: Record<string, any> = {};
         for (const f of fields) {
-            if (f.value !== undefined && f.value !== null) init[f.id] = f.value;
-            else if (f.type === "checkbox") init[f.id] = [];
-            else if (f.type === "terms") init[f.id] = false;
-            else init[f.id] = "";
+            // ← Use stored value from the DB response (pre-fill)
+            if (f.value !== undefined && f.value !== null) {
+                init[f.id] = f.value;
+            } else if (f.type === "checkbox") {
+                init[f.id] = [];
+            } else if (f.type === "terms") {
+                init[f.id] = false;
+            } else {
+                init[f.id] = "";
+            }
         }
+
         setValues(init);
         setInitialValues(init);
-    }, [fields]);
+        setSubmitted(false);
+        setFieldErrors({});
+        setTouched({});
+        setConsentTruth(false);
+        setConsentDpdp(false);
+        setOtpServer("");
+        setOtpInput("");
+        setOtpSent(false);
+    }, [record, fields.length]);
 
-    const handleFieldChange = (f: BuilderField, v: any) => {
-        setValues((prev) => ({ ...prev, [f.id]: v }));
-        setFieldErrors((prev) => ({ ...prev, [f.id]: validateField(f, v) }));
-        setTouched((prev) => ({ ...prev, [f.id]: true }));
+    /* ── Validation ───────────────────────────────────────────────── */
+    const validateAll = () => {
+        const e: Record<string, string> = {};
+        for (const f of fields) { const m = validateField(f, values[f.id]); if (m) e[f.id] = m; }
+        return e;
+    };
+    const handleChange = (f: BuilderField, v: any) => {
+        setValues((p) => ({ ...p, [f.id]: v }));
+        setFieldErrors((p) => ({ ...p, [f.id]: validateField(f, v) }));
+        setTouched((p) => ({ ...p, [f.id]: true }));
+    };
+    const handleBlur = (f: BuilderField) => {
+        setFieldErrors((p) => ({ ...p, [f.id]: validateField(f, values[f.id]) }));
+        setTouched((p) => ({ ...p, [f.id]: true }));
     };
 
+    const resetForm = () => {
+        setValues(initialValues);
+        setSubmitted(false); setFieldErrors({}); setTouched({});
+        setConsentTruth(false); setConsentDpdp(false);
+        setOtpServer(""); setOtpInput(""); setOtpSent(false);
+    };
+
+    /* ── Email / mobile extraction ────────────────────────────────── */
     const extractEmailMobile = () => {
-        let email = ""; let mobile = "";
+        let email = "", mobile = "";
         for (const f of fields) {
             const v = values[f.id];
-            if (!email && (f.type === "email" || /email/i.test(f.id))) email = v;
-            if (!mobile && (f.type === "phone" || /mobile/i.test(f.id) || /phone/i.test(f.id))) mobile = v;
+            if (!email  && (f.type === "email" || /email/i.test(f.id)  || /email/i.test(f.label)))  { if (typeof v === "string") email  = v.trim(); }
+            if (!mobile && (f.type === "phone" || /mobile/i.test(f.id) || /phone/i.test(f.id) || /mobile/i.test(f.label) || /phone/i.test(f.label))) { if (typeof v === "string") mobile = v.trim(); }
         }
         return { email, mobile };
     };
 
-    const generateOtp6 = async () => {
+    /* ── OTP ──────────────────────────────────────────────────────── */
+    const sendOtp = async () => {
         const otp = String(Math.floor(100000 + Math.random() * 900000));
         setOtpServer(otp); setOtpSent(true); setOtpInput("");
         try {
             const { email } = extractEmailMobile();
-            if (!email) { setDangerMsg("Email not found for OTP."); setDangerOpen(true); return; }
+            if (!email) { setDangerMsg("Email not found in form."); setDangerOpen(true); return; }
             setOtpSending(true);
             await sendOtpMail({ ToEmail: email, OTP: otp, ExpiryMinutes: 5 });
         } catch (err: any) {
-            setDangerMsg(err?.message || "Failed to send OTP."); setDangerOpen(true);
-        } finally { setOtpSending(false); }
-    };
-
-    const { email: extractedEmail, mobile: extractedMobile } = extractEmailMobile();
-    const needsOtp = Boolean(extractedEmail || extractedMobile);
-    const otpOk = !needsOtp || (otpServer.length === 6 && otpInput.trim() === otpServer);
-    const canSubmit = consentTruth && consentDpdp && otpOk;
-    const canRemoveConsent = otpOk;
-
-    const onSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        setSubmitted(true);
-        let hasErr = false;
-        for (const f of fields) {
-            const msg = validateField(f, values[f.id]);
-            if (msg) { setFieldErrors((p) => ({ ...p, [f.id]: msg })); hasErr = true; }
-            setTouched((p) => ({ ...p, [f.id]: true }));
+            setDangerMsg(err?.message || "OTP email failed"); setDangerOpen(true);
+        } finally {
+            setOtpSending(false);
         }
-        if (!hasErr) setConfirmOpen(true);
+    };
+    const otpOk     = otpServer.length === 6 && otpInput.trim() === otpServer;
+    const canUpdate = consentTruth && consentDpdp && otpOk;
+    const canWithdraw = otpOk;   // OTP required for consent withdraw too
+
+    /* ── Submit (update) form ─────────────────────────────────────── */
+    const onSubmit = (e: React.FormEvent) => {
+        e.preventDefault(); setSubmitted(true);
+        const errs = validateAll(); setFieldErrors(errs);
+        const at: Record<string, boolean> = {}; for (const f of fields) at[f.id] = true; setTouched(at);
+        if (Object.keys(errs).length) return;
+        setConfirmUpdateOpen(true);
     };
 
-    const onConfirmSubmit = async () => {
+    const normalizeValue = (f: BuilderField, v: any) => {
+        if (f.type === "upload") {
+            if (Array.isArray(v)) return v.map((x: File) => x instanceof File ? { name: x.name, size: x.size, type: x.type } : x);
+            if (v instanceof File) return { name: v.name, size: v.size, type: v.type };
+            return v ?? null;
+        }
+        return v;
+    };
+
+    const onConfirmUpdate = async () => {
         try {
             const { email, mobile } = extractEmailMobile();
-            const responsePayload = {
-                id: formObject.id || `form_${formId}`,
+            const payload = {
+                id: schema?.id || `form_${formId}`,
                 meta,
-                fields: fields.map((f) => ({ ...f, value: values[f.id] })),
-                updatedAt: new Date().toISOString(),
+                fields: fields.map((f) => ({ ...f, value: normalizeValue(f, values[f.id] ?? (f.type === "checkbox" ? [] : f.type === "terms" ? false : "")) })),
+                createdAt:   schema?.createdAt   || new Date().toISOString(),
+                updatedAt:   new Date().toISOString(),
+                submittedAt: new Date().toISOString(),
             };
 
+            // POST /api/Home/updateFormResponse
             const res = await updateFormResponseData({
-                ResponseId: responseId, FormId: formId, IPAddress: publicIP || "0.0.0.0", Status: "Y",
-                FormResponse: JSON.stringify(responsePayload), MobileNo: mobile || "N/A", EmailId: email || "N/A",
+                ResponseId: responseId,
+                FormId:     formId,
+                IPAddress:  publicIP,
+                Status:     "Y",
+                FormResponse: payload,
+                MobileNo: mobile,
+                EmailId:  email,
             });
 
-            if (res?.responseCode !== 101) throw new Error(res?.responseMessage || "Failed to update.");
-            setConfirmOpen(false); setSuccessTitle("Updated!"); setSuccessMsg("Response updated successfully."); setSuccessOpen(true);
+            if (res?.responseCode !== 101) throw new Error(res?.responseMessage || "Update failed");
+
+            setConfirmUpdateOpen(false);
+            setSuccessTitle("Updated!");
+            setSuccessMsg("Your form data has been updated successfully.");
+            setSuccessOpen(true);
+
+            // Refresh data
+            const fresh = await getFormResponseByResponseId(responseId);
+            if (fresh) setRecord(fresh);
         } catch (err: any) {
-            setConfirmOpen(false); setDangerMsg(err?.message || "Update failed."); setDangerOpen(true);
+            setConfirmUpdateOpen(false);
+            setDangerMsg(err?.message || "Update failed");
+            setDangerOpen(true);
         }
     };
 
-    const onRemoveConsent = async () => {
-        if (!removeConsentRemark.trim()) { setRemoveConsentRemarkError("Please enter remark."); return; }
-        try {
-            setRemoveConsentLoading(true);
-            const res = await addConsentRemoveRequest({ ResponseId: responseId, ConsentRemovalRemark: removeConsentRemark });
-            if (res?.responseCode !== 101) throw new Error(res?.responseMessage || "Consent remove failed.");
-            setRemoveConsentConfirmOpen(false); setSuccessTitle("Request Sent"); setSuccessMsg("Consent removal request submitted."); setSuccessOpen(true);
-        } catch (err: any) {
-            setRemoveConsentConfirmOpen(false); setDangerMsg(err?.message || "Consent remove failed."); setDangerOpen(true);
-        } finally { setRemoveConsentLoading(false); }
+    /* ── Consent Withdraw ─────────────────────────────────────────── */
+    const openConsentModal = () => {
+        setConsentRemark(""); setConsentRemarkErr("");
+        setConsentModalOpen(true);
     };
 
-    if (!responseId || Number.isNaN(responseId)) return <div className="p-5 text-center text-danger">Invalid response link.</div>;
-    if (selectedFormResponseByIdLoading) return <div className="p-5 text-center text-secondary"><span className="spinner-border spinner-border-sm me-2"/>Loading your data...</div>;
-    if (selectedFormResponseByIdError) return <div className="p-5 text-center text-danger">{selectedFormResponseByIdError}</div>;
-    if (!fields.length) return <div className="p-5 text-center text-secondary">Data not found.</div>;
+    const submitConsentWithdraw = async () => {
+        const remark = consentRemark.trim();
+        if (!remark) { setConsentRemarkErr("Please enter a reason for withdrawal."); return; }
 
-    return (
-        <div className="d-flex flex-column align-items-center min-vh-100 py-5" style={{ background: "linear-gradient(135deg, #f0f4fd 0%, #e2eaf6 100%)" }}>
-            <div style={{ maxWidth: "800px", width: "100%", padding: "0 16px" }}>
-                
-                {/* Header */}
-                <div className="mb-4 d-flex align-items-center justify-content-between">
-                    <div className="d-flex align-items-center gap-3">
-                        <div className="brand-badge d-flex align-items-center justify-content-center shadow-sm" style={{ width: 44, height: 44, fontSize: "1.1rem", background: "#4f6ef7", color: "#fff", borderRadius: "10px", fontWeight: "bold" }}>FF</div>
-                        <div className="lh-sm">
-                            <div className="fw-bold text-dark fs-5">NJ Softtech</div>
-                            <div className="small fw-semibold" style={{ color: "#64748b" }}>Data Management Gateway</div>
-                        </div>
-                    </div>
+        try {
+            setConsentLoading(true);
+
+            // POST /api/Home/addConsentRemoveRequest
+            const res = await addConsentRemoveRequest({
+                ResponseId: responseId,
+                ConsentRemovalRemark: remark,
+            });
+
+            if (res?.responseCode !== 101) throw new Error(res?.responseMessage || "Request failed");
+
+            setConsentModalOpen(false);
+            setSuccessTitle("Request Submitted");
+            setSuccessMsg("Your consent withdrawal request has been submitted. The Data Fiduciary will process it under DPDP Act, 2023.");
+            setSuccessOpen(true);
+        } catch (err: any) {
+            setConsentModalOpen(false);
+            setDangerMsg(err?.message || "Consent withdrawal failed");
+            setDangerOpen(true);
+        } finally {
+            setConsentLoading(false);
+        }
+    };
+
+    /* ── Guard states ─────────────────────────────────────────────── */
+    if (!responseId || isNaN(responseId)) {
+        return (
+            <div className="shell d-flex align-items-center justify-content-center min-vh-100" style={{ background: "#0b0c10" }}>
+                <div className="text-center p-4">
+                    <i className="bi bi-exclamation-triangle-fill text-warning mb-3 d-block" style={{ fontSize: 40 }} />
+                    <h5 className="text-white">Invalid Link</h5>
+                    <p className="text-secondary">This link is missing a valid response ID. Please use the link provided to you.</p>
                 </div>
+            </div>
+        );
+    }
 
-                {/* Form Card */}
-                <div className="card shadow-lg border-0 bg-white" style={{ borderRadius: "16px" }}>
-                    <div className="card-header p-4 p-md-5 border-0 bg-transparent" style={{ borderBottom: "1px solid #f1f5f9 !important" }}>
-                        <div className="text-uppercase fw-bold mb-2" style={{ fontSize: "0.75rem", color: "#4f6ef7", letterSpacing: "1px" }}>Manage Data</div>
-                        <h3 className="fw-bold text-dark mb-2">{meta.title || "My Form Details"}</h3>
-                        <p className="text-secondary mb-0" style={{ fontSize: "0.95rem" }}>Review, update, or withdraw your previously submitted data.</p>
+    if (dataLoading) {
+        return (
+            <div className="shell d-flex align-items-center justify-content-center min-vh-100" style={{ background: "#0b0c10" }}>
+                <div className="text-center">
+                    <div className="spinner-border mb-3" style={{ width: "2.5rem", height: "2.5rem", color: "#4f6ef7" }} />
+                    <div className="text-secondary">Loading your form data…</div>
+                </div>
+            </div>
+        );
+    }
+
+    if (dataError) {
+        return (
+            <div className="shell d-flex align-items-center justify-content-center min-vh-100" style={{ background: "#0b0c10" }}>
+                <div className="text-center p-4">
+                    <i className="bi bi-x-circle-fill text-danger mb-3 d-block" style={{ fontSize: 40 }} />
+                    <h5 className="text-white">Could Not Load Data</h5>
+                    <p className="text-secondary">{dataError}</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!fields.length) {
+        return (
+            <div className="shell d-flex align-items-center justify-content-center min-vh-100" style={{ background: "#0b0c10" }}>
+                <div className="text-secondary">No form fields found.</div>
+            </div>
+        );
+    }
+
+    /* ── Render ───────────────────────────────────────────────────── */
+    return (
+        <>
+            <div className="shell d-flex flex-column align-items-center min-vh-100 py-4" style={{ background: "#0b0c10" }}>
+                <div style={{ maxWidth: 820, width: "100%", padding: "0 16px" }}>
+
+                    {/* Topbar */}
+                    <div className="mb-4 d-flex align-items-center justify-content-between">
+                        <div className="d-flex align-items-center gap-3">
+                            <div style={{ width: 44, height: 44, background: "#4f6ef7", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.1rem", fontWeight: "bold", color: "#fff" }}>FF</div>
+                            <div>
+                                <div className="fw-bold text-white fs-5">NJ Softtech</div>
+                                <div className="small fw-semibold" style={{ color: "#7c9ff7" }}>My Form Details</div>
+                            </div>
+                        </div>
+                        <span className="badge d-none d-md-flex align-items-center gap-2 py-2 px-3" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#e2e8f0", borderRadius: 8 }}>
+                            <i className="bi bi-shield-lock" style={{ color: "#3dd68c" }} /> Encrypted
+                        </span>
                     </div>
 
-                    <div className="card-body p-4 p-md-5 pt-3">
-                        <form noValidate onSubmit={onSubmit}>
-                            <div className="row g-4">
-                                {fields.map((f) => (
-                                    <div key={f.id} className="col-12 col-md-12">
-                                        <label className="form-label fw-semibold text-dark mb-2">
-                                            {f.label} {f.required && <span className="text-danger">*</span>}
-                                        </label>
-                                        {renderField(f, values[f.id], (v) => handleFieldChange(f, v), () => handleFieldBlur(f), fieldErrors[f.id])}
-                                        {fieldErrors[f.id] && (submitted || touched[f.id]) && <div className="form-text text-danger mt-1"><i className="bi bi-exclamation-circle me-1" />{fieldErrors[f.id]}</div>}
-                                    </div>
-                                ))}
+                    {/* Info chip — response metadata */}
+                    <div className="mb-3 d-flex flex-wrap gap-2 align-items-center">
+                        <span style={{ background: "rgba(79,110,247,0.1)", border: "1px solid rgba(79,110,247,0.2)", color: "#7c9ff7", borderRadius: 6, padding: "4px 12px", fontSize: 12 }}>
+                            <i className="bi bi-fingerprint me-1" />Response #{responseId}
+                        </span>
+                        <span style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#adb5bd", borderRadius: 6, padding: "4px 12px", fontSize: 12 }}>
+                            <i className="bi bi-envelope me-1" />{record?.EmailId || "—"}
+                        </span>
+                        <span style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#adb5bd", borderRadius: 6, padding: "4px 12px", fontSize: 12 }}>
+                            <i className="bi bi-telephone me-1" />{record?.MobileNo || "—"}
+                        </span>
+                        {record?.CreatedOn && (
+                            <span style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#adb5bd", borderRadius: 6, padding: "4px 12px", fontSize: 12 }}>
+                                <i className="bi bi-calendar3 me-1" />Submitted {new Date(record.CreatedOn).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                            </span>
+                        )}
+                    </div>
 
-                                {/* Consent Block */}
-                                <div className="col-12 mt-4">
-                                    <div className="p-4" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px" }}>
-                                        <h6 className="fw-bold mb-3" style={{ color: "#4f6ef7" }}><i className="bi bi-shield-check me-2" /> Verify Identity</h6>
-                                        
-                                        <div className="d-flex flex-column gap-2 mb-4">
-                                            <label className="form-check d-flex align-items-start gap-3 mb-0" style={{ cursor: "pointer" }}>
-                                                <input className="form-check-input mt-1" type="checkbox" checked={consentTruth} onChange={(e) => setConsentTruth(e.target.checked)} style={{ transform: "scale(1.2)" }} />
-                                                <span className="small text-dark">I confirm these updates are truthful.</span>
-                                            </label>
-                                            <label className="form-check d-flex align-items-start gap-3 mb-0" style={{ cursor: "pointer" }}>
-                                                <input className="form-check-input mt-1" type="checkbox" checked={consentDpdp} onChange={(e) => setConsentDpdp(e.target.checked)} style={{ transform: "scale(1.2)" }} />
-                                                <span className="small text-dark">I maintain my consent for processing under the DPDP Act, 2023.</span>
-                                            </label>
-                                        </div>
+                    {/* Main card */}
+                    <div className="card shadow-lg border-0" style={{ background: "#11131a", borderRadius: 16 }}>
 
-                                        {needsOtp && (
-                                            <div className="d-flex flex-column flex-md-row align-items-md-center gap-3 pt-3" style={{ borderTop: "1px dashed #cbd5e1" }}>
-                                                <div className="small fw-semibold text-dark">Verification OTP</div>
-                                                <input className="form-control" style={{ maxWidth: 150 }} placeholder="6 digits" maxLength={6} value={otpInput} onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ""))} />
-                                                <button type="button" className="btn btn-outline-primary btn-sm px-3 fw-bold" onClick={generateOtp6} disabled={otpSending}>
-                                                    {otpSending ? "Sending..." : otpSent ? "Resend OTP" : "Send OTP"}
-                                                </button>
-                                                {otpInput.length === 6 && (otpOk ? <i className="bi bi-check-circle-fill text-success fs-5" /> : <i className="bi bi-x-circle-fill text-danger fs-5" />)}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
+                        {/* Card header */}
+                        <div className="card-header border-0 p-4" style={{ background: "transparent", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                            <div className="text-uppercase fw-bold mb-1" style={{ fontSize: "0.72rem", color: "#7c9ff7", letterSpacing: "1px" }}>
+                                {meta.category ?? "Registration"}
+                            </div>
+                            <div className="fw-bold text-white fs-4 mb-1">{meta.title ?? "My Form"}</div>
+                            {meta.subtitle && <div style={{ fontSize: ".9rem", color: "#94a3b8" }}>{meta.subtitle}</div>}
 
-                                {/* FOOTER BUTTONS */}
-                                <div className="col-12 mt-4 pt-4 d-flex flex-wrap gap-3 align-items-center justify-content-between" style={{ borderTop: "1px solid #f1f5f9" }}>
-                                    <button 
-                                        type="button" 
-                                        className="btn btn-outline-danger fw-bold px-4" 
-                                        onClick={() => setRemoveConsentConfirmOpen(true)}
-                                        disabled={!canRemoveConsent}
-                                        title={!canRemoveConsent ? "Verify OTP to unlock" : ""}
-                                    >
-                                        <i className="bi bi-trash3 me-2" /> Withdraw Consent
-                                    </button>
-                                    <button type="submit" className="btn btn-primary fw-bold px-4" disabled={!canSubmit}>
-                                        <i className="bi bi-arrow-repeat me-2" /> Update Info
-                                    </button>
+                            {/* DPDP notice strip */}
+                            <div className="mt-3 p-3 d-flex align-items-start gap-2" style={{ background: "rgba(79,110,247,0.07)", borderRadius: 10, border: "1px solid rgba(79,110,247,0.15)" }}>
+                                <i className="bi bi-info-circle text-primary mt-1 flex-shrink-0" />
+                                <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
+                                    Your previously submitted data is shown below. You may <strong className="text-white">update your information</strong> or submit a <strong className="text-white">Consent Withdrawal Request</strong> under the Digital Personal Data Protection Act, 2023 (Section 12 & 13).
                                 </div>
                             </div>
-                        </form>
+                        </div>
+
+                        {/* Card body — form */}
+                        <div className="card-body p-4 p-md-5 text-white">
+                            <form noValidate onSubmit={onSubmit}>
+                                <div className="row g-4">
+
+                                    {/* Fields */}
+                                    {fields.map((f) => {
+                                        const err     = fieldErrors[f.id] || "";
+                                        const showErr = !!err && (submitted || touched[f.id]);
+                                        const desc    = (f.description ?? "").trim();
+
+                                        return (
+                                            <div key={f.id} className="col-12">
+                                                <div className="row g-3 align-items-start">
+                                                    <div className="col-12 col-md-7">
+                                                        <label className="form-label fw-semibold text-light mb-2">
+                                                            {f.label} {f.required && <span className="text-danger">*</span>}
+                                                        </label>
+                                                        {renderField(f, values[f.id], (v) => handleChange(f, v), () => handleBlur(f), showErr ? err : "")}
+                                                        {showErr && (
+                                                            <div className="form-text text-danger mt-1">
+                                                                <i className="bi bi-exclamation-circle me-1" />{err}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="col-12 col-md-5">
+                                                        {desc && (
+                                                            <div className="small p-3" style={{ background: "rgba(79,110,247,0.05)", border: "1px solid rgba(79,110,247,0.1)", borderRadius: 8, color: "#94a3b8", lineHeight: 1.5, marginTop: 28, whiteSpace: "pre-wrap" }}>
+                                                                <i className="bi bi-info-circle text-primary me-2" />{desc}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {/* OTP + Consent block */}
+                                    <div className="col-12 mt-2">
+                                        <div className="p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12 }}>
+                                            <h6 className="fw-bold mb-3" style={{ color: "#7c9ff7" }}>
+                                                <i className="bi bi-shield-check me-2" />Verification & Consent
+                                            </h6>
+
+                                            <div className="d-flex flex-column gap-3 mb-4">
+                                                <label className="form-check d-flex align-items-start gap-3 mb-0" style={{ cursor: "pointer" }}>
+                                                    <input className="form-check-input mt-1" type="checkbox" style={{ transform: "scale(1.2)" }} checked={consentTruth} onChange={(e) => setConsentTruth(e.target.checked)} />
+                                                    <span className="small text-light" style={{ lineHeight: 1.5 }}>I am aware that it is my duty to submit truthful information.</span>
+                                                </label>
+
+                                                <label className="form-check d-flex align-items-start gap-3 mb-0" style={{ cursor: "pointer" }}>
+                                                    <input className="form-check-input mt-1" type="checkbox" style={{ transform: "scale(1.2)" }} checked={consentDpdp} onChange={(e) => setConsentDpdp(e.target.checked)} />
+                                                    <span className="small text-light" style={{ lineHeight: 1.5 }}>
+                                                        I hereby provide my free, specific, informed, and unambiguous consent to the Data Fiduciary for the processing, retention, and use of my personal data in accordance with the applicable provisions of the <strong className="text-white">Digital Personal Data Protection Act, 2023</strong>.
+                                                    </span>
+                                                </label>
+                                            </div>
+
+                                            {/* OTP row */}
+                                            <div className="d-flex flex-column flex-md-row align-items-md-center gap-3 pt-3" style={{ borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
+                                                <div className="small fw-semibold text-light text-nowrap">Email / SMS OTP</div>
+                                                <div className="position-relative" style={{ maxWidth: 200, width: "100%" }}>
+                                                    <input
+                                                        className={`form-control ${otpInput.trim().length === 6 ? otpOk ? "is-valid" : "is-invalid" : ""}`}
+                                                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
+                                                        placeholder="Enter 6-digit OTP"
+                                                        value={otpInput} maxLength={6} inputMode="numeric" pattern="[0-9]*"
+                                                        onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                                                    />
+                                                    {otpInput.trim().length === 6 && (
+                                                        <span className="position-absolute top-50 translate-middle-y" style={{ right: 12 }}>
+                                                            {otpOk ? <i className="bi bi-check-circle-fill text-success" /> : <i className="bi bi-x-circle-fill text-danger" />}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <button type="button" className="btn btn-sm text-nowrap" style={{ background: "rgba(79,110,247,0.1)", border: "1px solid rgba(79,110,247,0.2)", color: "#7c9ff7" }} onClick={sendOtp} disabled={otpSending}>
+                                                    {otpSending ? <><span className="spinner-border spinner-border-sm me-2" />Sending…</> : otpSent ? "Resend OTP" : "Send OTP"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Action buttons */}
+                                    <div className="col-12 mt-2 pt-4 d-flex flex-wrap gap-3 align-items-center justify-content-between" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                                        <div className="d-none d-md-block text-secondary small">
+                                            <i className="bi bi-pencil-square me-1" />Review your data before updating
+                                        </div>
+
+                                        <div className="d-flex flex-wrap gap-2 ms-auto">
+                                            {/* Consent Withdraw */}
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm px-3"
+                                                style={{ background: "rgba(220,53,69,0.1)", border: "1px solid rgba(220,53,69,0.25)", color: "#f86e7a", borderRadius: 8 }}
+                                                disabled={!canWithdraw || consentLoading}
+                                                title={!canWithdraw ? "Verify OTP first to withdraw consent" : ""}
+                                                onClick={openConsentModal}
+                                            >
+                                                <i className="bi bi-shield-x me-1" />
+                                                {consentLoading ? "Processing…" : "Withdraw Consent"}
+                                            </button>
+
+                                            {/* Reset */}
+                                            <button type="button" className="btn btn-sm px-3" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#94a3b8", borderRadius: 8 }} onClick={resetForm}>
+                                                Reset
+                                            </button>
+
+                                            {/* Update */}
+                                            <button type="submit" className="btn btn-sm px-4 fw-bold d-flex align-items-center gap-2" style={{ background: "#4f6ef7", color: "#fff", border: "none", borderRadius: 8 }} disabled={!canUpdate} title={!canUpdate ? "Accept consent and verify OTP to update" : ""}>
+                                                <i className="bi bi-arrow-repeat" />Update Info
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div className="text-center mt-4 mb-5" style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.82rem" }}>
+                        © {year} NJ Softtech · Consent Management Portal · DPDP Act, 2023
                     </div>
                 </div>
             </div>
 
-            {/* WITHDRAW CONSENT MODAL (Light Theme) */}
-            {removeConsentConfirmOpen && (
-                <div className="modal d-block" style={{ background: "rgba(0,0,0,0.5)" }}>
-                    <div className="modal-dialog modal-dialog-centered">
-                        <div className="modal-content border-0 shadow-lg" style={{ borderRadius: "16px" }}>
-                            <div className="modal-header bg-danger bg-opacity-10 border-0">
-                                <h5 className="modal-title fw-bold text-danger"><i className="bi bi-exclamation-triangle me-2" /> Withdraw Consent</h5>
-                                <button type="button" className="btn-close" onClick={() => setRemoveConsentConfirmOpen(false)} />
-                            </div>
-                            <div className="modal-body p-4">
-                                <p className="mb-3 text-secondary small">Please provide a reason for withdrawing your consent. This action will notify the Data Fiduciary to remove your records.</p>
-                                <label className="form-label fw-semibold text-dark">Remark <span className="text-danger">*</span></label>
-                                <textarea className={`form-control ${removeConsentRemarkError ? "is-invalid" : ""}`} rows={4} placeholder="Reason for withdrawal..." value={removeConsentRemark} onChange={(e) => { setRemoveConsentRemark(e.target.value); if(e.target.value) setRemoveConsentRemarkError(""); }} />
-                                {removeConsentRemarkError && <div className="invalid-feedback d-block">{removeConsentRemarkError}</div>}
-                            </div>
-                            <div className="modal-footer border-0">
-                                <button type="button" className="btn btn-light px-4" onClick={() => setRemoveConsentConfirmOpen(false)}>Cancel</button>
-                                <button type="button" className="btn btn-danger px-4 fw-bold" onClick={onRemoveConsent} disabled={removeConsentLoading}>{removeConsentLoading ? "Sending..." : "Send Request"}</button>
+            {/* ── Confirm Update popup ──────────────────────────────── */}
+            <PopupAlert
+                open={confirmUpdateOpen}
+                type="warning"
+                title="Confirm Update"
+                message="Are you sure you want to update your form data? This will replace your previously submitted information."
+                confirmMode confirmText="Yes, Update" cancelText="Cancel"
+                onClose={() => setConfirmUpdateOpen(false)}
+                onConfirm={onConfirmUpdate}
+                onCancel={() => setConfirmUpdateOpen(false)}
+            />
+
+            {/* ── Consent Withdraw Modal ────────────────────────────── */}
+            {consentModalOpen && (
+                <>
+                    <div className="modal-backdrop fade show" style={{ zIndex: 1050 }} />
+                    <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true" style={{ zIndex: 1055 }}>
+                        <div className="modal-dialog modal-dialog-centered" role="document" style={{ maxWidth: 480 }}>
+                            <div className="modal-content" style={{ background: "#11131a", border: "1px solid rgba(220,53,69,0.25)", borderRadius: 14 }}>
+
+                                <div className="modal-header" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)", background: "rgba(220,53,69,0.06)" }}>
+                                    <h5 className="modal-title d-flex align-items-center gap-2 text-white">
+                                        <i className="bi bi-shield-x text-danger" />
+                                        Consent Withdrawal Request
+                                    </h5>
+                                    <button type="button" className="btn-close btn-close-white" onClick={() => { if (!consentLoading) setConsentModalOpen(false); }} />
+                                </div>
+
+                                <div className="modal-body p-4">
+                                    <div className="mb-3 p-3" style={{ background: "rgba(220,53,69,0.07)", borderRadius: 8, border: "1px solid rgba(220,53,69,0.15)", fontSize: 13, color: "#f8d7da" }}>
+                                        <i className="bi bi-info-circle me-2" />
+                                        Under <strong>Section 12 of the DPDP Act, 2023</strong>, you have the right to withdraw your consent at any time. The Data Fiduciary will process this request and notify you.
+                                    </div>
+
+                                    <label className="form-label fw-semibold text-light">
+                                        Reason for Withdrawal <span className="text-danger">*</span>
+                                    </label>
+                                    <textarea
+                                        className={`form-control ${consentRemarkErr ? "is-invalid" : ""}`}
+                                        rows={4}
+                                        placeholder="Please explain why you wish to withdraw your consent (e.g., data no longer needed, incorrect data, etc.)..."
+                                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#f8f9fa", resize: "vertical" }}
+                                        value={consentRemark}
+                                        onChange={(e) => { setConsentRemark(e.target.value); if (e.target.value.trim()) setConsentRemarkErr(""); }}
+                                    />
+                                    {consentRemarkErr && <div className="invalid-feedback d-block">{consentRemarkErr}</div>}
+
+                                    <div className="mt-2" style={{ fontSize: 12, color: "#6c757d" }}>
+                                        <i className="bi bi-clock me-1" />Requests are typically processed within 30 days.
+                                    </div>
+                                </div>
+
+                                <div className="modal-footer" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                                    <button type="button" className="btn btn-sm btn-outline-secondary px-4" onClick={() => { if (!consentLoading) setConsentModalOpen(false); }}>Cancel</button>
+                                    <button type="button" className="btn btn-sm btn-danger px-4" onClick={submitConsentWithdraw} disabled={consentLoading}>
+                                        {consentLoading ? <><span className="spinner-border spinner-border-sm me-2" />Sending…</> : <><i className="bi bi-send me-1" />Send Request</>}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
+                </>
             )}
 
-            <PopupAlert open={confirmOpen} type="warning" title="Confirm Update" message="Are you sure you want to update this form response?" confirmMode confirmText="Yes, Update" cancelText="No" onClose={() => setConfirmOpen(false)} onConfirm={onConfirmSubmit} onCancel={() => setConfirmOpen(false)} />
-            <PopupAlert open={successOpen} type="success" title={successTitle} message={successMsg} onClose={() => setSuccessOpen(false)} autoCloseMs={2500} />
-            <PopupAlert open={dangerOpen} type="danger" title="Error" message={dangerMsg} onClose={() => setDangerOpen(false)} autoCloseMs={3000} />
-        </div>
+            {/* ── Alerts ────────────────────────────────────────────── */}
+            <PopupAlert open={successOpen} type="success" title={successTitle} message={successMsg} onClose={() => setSuccessOpen(false)} autoCloseMs={3000} />
+            <PopupAlert open={dangerOpen}  type="danger"  title="Error"         message={dangerMsg}  onClose={() => setDangerOpen(false)}  autoCloseMs={3000} />
+        </>
     );
 };
 
