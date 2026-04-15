@@ -2218,7 +2218,7 @@ const FormBuilder: React.FC = () => {
                                             <div className="topbar mb-2 d-flex align-items-center justify-content-between">
                                                 <div className="d-flex align-items-center gap-2">
                                                     <div className="brand-badge">FF</div>
-                                                    <div className="lh-sm">
+                                                        <div className="lh-sm">
                                                         <div className="fw-bold" style={{ fontSize: ".98rem" }}>NJ Softtech</div>
                                                         <div className="text-secondary" style={{ fontSize: ".78rem" }}>Secure Form</div>
                                                     </div>
