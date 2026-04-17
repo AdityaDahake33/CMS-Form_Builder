@@ -645,6 +645,44 @@ import { getNoticesList } from "../Api/noticeApi";
 type NoticeStatus = "Draft" | "Published" | "Archived";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+const getPrivacyNoticeName = (notice: any, id: string) => {
+    // Try various possible field names for the notice name
+    return notice.noticeName || 
+           notice.NoticeName || 
+           notice.name || 
+           notice.Name || 
+           notice.title || 
+           notice.Title ||
+           notice.privacyNoticeName ||
+           notice.PrivacyNoticeName ||
+           // If there's any content/notice text, try to extract a title from it
+           (notice.notice || notice.Notice ? extractTitleFromContent(notice.notice || notice.Notice) : null) ||
+           // Final fallback with more descriptive text
+           `Privacy Notice ${id}`;
+};
+
+const extractTitleFromContent = (content: string) => {
+    if (!content || typeof content !== 'string') return null;
+    
+    // Try to extract title from HTML content
+    const titleMatch = content.match(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/i);
+    if (titleMatch && titleMatch[1]) {
+        return titleMatch[1].replace(/<[^>]*>/g, '').trim();
+    }
+    
+    // Try to extract title from first paragraph if it looks like a title
+    const firstParagraph = content.match(/<p[^>]*>(.*?)<\/p>/i);
+    if (firstParagraph && firstParagraph[1]) {
+        const text = firstParagraph[1].replace(/<[^>]*>/g, '').trim();
+        // If it's reasonably short and doesn't look like regular content
+        if (text.length < 100 && !text.includes('.')) {
+            return text;
+        }
+    }
+    
+    return null;
+};
+
 const statusBadge = (status: NoticeStatus | string) => {
     const badgeClass = status === "Draft" 
         ? "badge text-bg-warning rounded-pill"
@@ -712,7 +750,7 @@ const PrivacyNoticeList: React.FC<Props> = ({ onCreateNew, onEdit }) => {
 
     const filtered = notices.filter((n, i) => {
         const id = n.id || n.Id || n.noticeId || n.NoticeId || i.toString();
-        const name = n.noticeName || n.NoticeName || `Privacy Notice #${id}`;
+        const name = getPrivacyNoticeName(n, id);
         const matchSearch = name.toLowerCase().includes(searchTerm.toLowerCase());
         const mappedStatus = n.status || "Published";
         const matchStatus = statusFilter === "All" || mappedStatus === statusFilter;
@@ -863,7 +901,7 @@ const PrivacyNoticeList: React.FC<Props> = ({ onCreateNew, onEdit }) => {
                                 <tbody>
                                     {filtered.map((n, i) => {
                                         const id = n.id || n.Id || n.noticeId || n.NoticeId || i.toString();
-                                        const name = n.noticeName || n.NoticeName || `Privacy Notice #${id}`;
+                                        const name = getPrivacyNoticeName(n, id);
                                         const htmlContent = n.notice || n.Notice || "<p>No content</p>";
                                         const mappedStatus = n.status || "Published";
                                         
