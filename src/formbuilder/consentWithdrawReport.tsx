@@ -3,7 +3,6 @@ import { useProject } from "../Context/projectContext";
 import { Skeleton } from "../Components/loader";
 import { PopupAlert } from "../Components/alert";
 import { addConsentRemoveRequestAction } from "../Api/addRemoveConsentRequestAction";
-import { fetchConsentRemoveRequestList } from "../Api/getConsentRemovalRequestList";
 
 const TableSkeletonRows: React.FC<{ rows?: number }> = ({ rows = 5 }) => {
     return (
@@ -82,6 +81,83 @@ const getResolvedBadge = (value?: string) => {
     return value === "Y"
         ? { text: "Resolved", className: badgeClass("success") }
         : { text: "Pending", className: badgeClass("danger") };
+};
+
+const getUserName = (row: any, id: string) => {
+    let potentialName = "";
+    
+    // Try to extract user name from FormResponse object (actual form data submitted by user)
+    if (row.FormResponse && typeof row.FormResponse === "object") {
+        // Check if FormResponse has fields array (typical form structure)
+        if (row.FormResponse.fields && Array.isArray(row.FormResponse.fields)) {
+            // Look through form fields for name-related fields
+            for (const field of row.FormResponse.fields) {
+                if (field && field.value) {
+                    const fieldName = (field.name || field.label || field.id || "").toLowerCase();
+                    const fieldValue = String(field.value).trim();
+                    
+                    // Check for common name field patterns
+                    if (fieldName.includes('name') && fieldValue && fieldValue !== '') {
+                        // Prioritize full name fields
+                        if (fieldName.includes('full') || fieldName === 'name') {
+                            return fieldValue;
+                        }
+                        // Store as potential name if it's a single name field
+                        if (!potentialName) {
+                            potentialName = fieldValue;
+                        }
+                    }
+                }
+            }
+            
+            // Return potential name if found
+            if (potentialName) {
+                return potentialName;
+            }
+        }
+        
+        // Check for direct name properties in FormResponse
+        const formResponseName = row.FormResponse.FullName ||
+                                row.FormResponse.Name ||
+                                row.FormResponse.fullName ||
+                                row.FormResponse.name ||
+                                row.FormResponse.CustomerName ||
+                                row.FormResponse.customerName ||
+                                row.FormResponse.UserName ||
+                                row.FormResponse.userName ||
+                                row.FormResponse.FirstName ||
+                                row.FormResponse.firstName;
+        
+        if (formResponseName) return String(formResponseName);
+    }
+    
+    // Try direct fields in the row object (fallback)
+    const directName = row.FullName ||
+                       row.Name ||
+                       row.fullName ||
+                       row.name ||
+                       row.CustomerName ||
+                       row.customerName ||
+                       row.UserName ||
+                       row.userName ||
+                       row.FirstName ||
+                       row.firstName;
+    
+    if (directName) return String(directName);
+    
+    // Try to combine first and last name if available
+    const firstName = row.FirstName || row.firstName || row.FormResponse?.FirstName || row.FormResponse?.firstName;
+    const lastName = row.LastName || row.lastName || row.FormResponse?.LastName || row.FormResponse?.lastName;
+    
+    if (firstName && lastName) {
+        return `${String(firstName)} ${String(lastName)}`;
+    }
+    
+    if (firstName) return String(firstName);
+    if (lastName) return String(lastName);
+    
+    // Final fallback with more descriptive text
+    return `User ${id}`;
 };
 
 export default function ConsentWithdrawRequest() {
@@ -242,20 +318,7 @@ export default function ConsentWithdrawRequest() {
             const consentBadge = getConsentBadge(r.Consent);
             const resolvedBadge = getResolvedBadge(r.ConsentResolved);
 
-            let summary = `Response #${r.Id}`;
-            if (r.FormResponse && typeof r.FormResponse === "object") {
-                const maybeName =
-                    r.FormResponse.FullName ||
-                    r.FormResponse.Name ||
-                    r.FormResponse.fullName ||
-                    r.FormResponse.name ||
-                    r.FormResponse.CustomerName ||
-                    r.FormResponse.customerName;
-
-                if (maybeName) {
-                    summary = String(maybeName);
-                }
-            }
+            const summary = getUserName(r, String(r.Id));
 
             return {
                 key: r.Id,
@@ -519,7 +582,7 @@ export default function ConsentWithdrawRequest() {
 
                                     <div className="mb-3 small text-secondary">
                                         User: <span className="fw-semibold text-dark">
-                                            {selectedRow?.EmailId || selectedRow?.MobileNo || `Response #${selectedRow?.Id}`}
+                                            {selectedRow ? getUserName(selectedRow, String(selectedRow.Id)) : "N/A"}
                                         </span>
                                     </div>
 
