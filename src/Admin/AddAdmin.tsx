@@ -148,7 +148,7 @@ export default function AddAdmin() {
 
     const isSubAdmin = selectedRoleName.trim().toUpperCase() === "SUB ADMIN" || selectedRoleName.trim().toUpperCase() === "MAINADMIN";
 
-    const canEditPermissions = isSubAdmin;
+    const canEditPermissions = true; // Enable permissions editing for all user roles
 
 
 
