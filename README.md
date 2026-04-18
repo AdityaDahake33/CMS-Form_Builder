@@ -1,11 +1,9 @@
-# React + TypeScript + Vite
+# Consent Management System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+DPDP Act-compliant CMS — stores, shares and manages user data on behalf of organizations under DPDP Act of India.
 
-Currently, two official plugins are available:
+<img width="1159" height="652" alt="image" src="https://github.com/user-attachments/assets/8c9cce1a-bf61-4efb-9736-a45fd34162ec" />
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
 ## React Compiler
 
