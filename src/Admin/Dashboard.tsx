@@ -77,13 +77,39 @@ const Dashboard: React.FC = () => {
             return [{ badge: "Action", text: "No recent activity available", user: "—", form: "—", time: "—" }];
         }
 
-        return dashboard.activityLogs.map((item: any, index: number) => ({
-            badge: "Action",
-            text: item?.text || item?.activity || item?.message || `Activity ${index + 1}`,
-            user: item?.user || item?.userName || item?.email || "—",
-            form: item?.form || item?.formName || "—",
-            time: item?.time || item?.createdOn || item?.created_at || item?.timestamp || item?.date || "",
-        }));
+        return dashboard.activityLogs.map((item: any, index: number) => {
+            // Use correct API field names
+            const text = item?.activity || `Activity ${index + 1}`;
+            const time = item?.created || "";
+            
+            // Parse user from activity text (extract email from parentheses)
+            let user = "—";
+            const emailMatch = text.match(/\(([^@]+@[^)]+)\)/);
+            if (emailMatch) {
+                user = emailMatch[1];
+            } else {
+                // Try to extract username from parentheses (non-email)
+                const userMatch = text.match(/\(([^)]+)\)/);
+                if (userMatch) {
+                    user = userMatch[1].trim();
+                }
+            }
+            
+            // Parse form/response number from activity text (extract numbers in parentheses)
+            let form = "—";
+            const numberMatch = text.match(/\((\d+)\)/);
+            if (numberMatch) {
+                form = `Response No. ${numberMatch[1]}`;
+            }
+
+            return {
+                badge: "Action",
+                text: text,
+                user: user,
+                form: form,
+                time: time,
+            };
+        });
     }, [dashboard]);
 
     return (
@@ -106,16 +132,16 @@ const Dashboard: React.FC = () => {
                 )}
 
                 {/* Stats Cards */}
-                <div className="row g-3 mb-3">
+                <div className="row g-4 mb-3">
                     {stats.map((s) => (
                         <div key={s.label} className="col-12 col-md-6 col-xl-3">
-                            <div className="stat-card h-100">
+                            <div className="stat-card h-100" style={{ padding: "1.25rem" }}>
                                 <div className="d-flex justify-content-between">
                                     <div>
                                         <div className="text-secondary small">{s.label}</div>
-                                        <div className="stat-value">{dashboardLoading ? "..." : s.value}</div>
+                                        <div className="stat-value" style={{ fontSize: "1.5rem" }}>{dashboardLoading ? "..." : s.value}</div>
                                     </div>
-                                    <i className={s.iconClass} />
+                                    <i className={s.iconClass} style={{ fontSize: "1.5rem" }} />
                                 </div>
                             </div>
                         </div>
@@ -137,10 +163,10 @@ const Dashboard: React.FC = () => {
                                 <table className="table">
                                     <thead>
                                         <tr>
-                                            <th>Event</th>
-                                            <th>User</th>
-                                            <th>Form</th>
-                                            <th className="text-end">Time</th>
+                                            <th style={{ width: "40%" }}>Event</th>
+                                            <th style={{ width: "25%" }} className="text-center">User</th>
+                                            <th style={{ width: "20%" }} className="text-center">Form</th>
+                                            <th style={{ width: "15%" }} className="text-end">Time</th>
                                         </tr>
                                     </thead>
 
@@ -151,8 +177,8 @@ const Dashboard: React.FC = () => {
                                                     <span className={badgeClass(r.badge)}>{r.badge}</span>
                                                     {r.text}
                                                 </td>
-                                                <td>{r.user}</td>
-                                                <td>{r.form}</td>
+                                                <td className="text-center">{r.user}</td>
+                                                <td className="text-center">{r.form}</td>
                                                 <td className="text-end" title={r.time}>
                                                     {formatRelativeTime(r.time)}
                                                 </td>
