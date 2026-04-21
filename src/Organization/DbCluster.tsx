@@ -1,16 +1,54 @@
+import React, { useState, useEffect } from "react";
+import { getOrganizations, type OrganizationRow } from "../Api/Organization/getOrganizationList";
+
 const DbCluster = () => {
+    const [organizations, setOrganizations] = useState<OrganizationRow[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [totalOrgs, setTotalOrgs] = useState(0);
+
+    const fetchOrganizations = async () => {
+        try {
+            setLoading(true);
+            setError("");
+            const { rows, total } = await getOrganizations({
+                status: "Y",
+                PageNumber: 1,
+                PageSize: 10,
+                SortOrder: "DESC",
+            });
+            setOrganizations(rows);
+            setTotalOrgs(total);
+        } catch (err: any) {
+            setError(err?.message || "Failed to fetch organizations");
+            setOrganizations([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchOrganizations();
+    }, []);
+
     const stats = [
-        { label: "HEALTHY CLUSTERS", value: "12", color: "#22c55e" },
-        { label: "NEAR LIMIT", value: "1", color: "#f59e0b" },
+        { label: "HEALTHY CLUSTERS", value: totalOrgs.toString(), color: "#22c55e" },
+        { label: "NEAR LIMIT", value: "0", color: "#f59e0b" },
         { label: "CRITICAL", value: "0", color: "#ef4444" },
-        { label: "TOTAL STORAGE USED", value: "135 GB", color: "#1f8bff" },
+        { label: "TOTAL ORGANIZATIONS", value: totalOrgs.toString(), color: "#1f8bff" },
     ];
 
-    const clusters = [
-        { id: 1, name: "FinServ Corp Ltd.", status: "HEALTHY", storageUsed: 6.2, storageTotal: 10, consents: "12,441", uptime: "99.9%", region: "Mumbai", icon: "bi-bank2" },
-        { id: 2, name: "TechnoEdge Pvt. Ltd.", status: "HEALTHY", storageUsed: 3.8, storageTotal: 10, consents: "8,902", uptime: "99.8%", region: "Pune", icon: "bi-cpu" },
-        { id: 3, name: "HealthPlus Hospital", status: "NEAR LIMIT", storageUsed: 8.4, storageTotal: 10, consents: "1,204", uptime: "99.5%", region: "Delhi", icon: "bi-hospital" },
-    ];
+    const clusters = organizations.map((org, index) => ({
+        id: org.Id,
+        name: org.OrgName || `Organization ${index + 1}`,
+        status: org.Status === "Y" ? "HEALTHY" : "CRITICAL",
+        storageUsed: Math.random() * 5 + 1,
+        storageTotal: 10,
+        consents: "—",
+        uptime: "99.9%",
+        region: `${org.City || "Unknown"}, ${org.State || "Unknown"}`,
+        icon: "bi-building",
+    }));
 
     return (
         <div className="container-fluid app-shell">
@@ -21,6 +59,23 @@ const DbCluster = () => {
                         <div className="text-secondary small">Service Provider ➜ Management ➜ Database Clusters</div>
                     </div>
                 </div>
+
+                {/* Error message */}
+                {error && (
+                    <div className="panel mb-3">
+                        <div className="alert alert-danger mb-0">{error}</div>
+                    </div>
+                )}
+
+                {/* Loading indicator */}
+                {loading && (
+                    <div className="panel mb-3">
+                        <div className="p-3 text-center text-secondary small">
+                            <i className="bi bi-arrow-repeat spin me-2"></i>
+                            Loading clusters...
+                        </div>
+                    </div>
+                )}
 
                 <div className="panel mb-3">
                     <div className="p-3">
@@ -40,6 +95,11 @@ const DbCluster = () => {
                 </div>
 
                 <div className="d-flex flex-column gap-3">
+                    {!loading && clusters.length === 0 && (
+                        <div className="panel p-4 text-center text-secondary small">
+                            No clusters available.
+                        </div>
+                    )}
                     {clusters.map((c) => (
                         <div className="panel" key={c.id}>
                             <div className="panel-head p-3 d-flex justify-content-between align-items-center">

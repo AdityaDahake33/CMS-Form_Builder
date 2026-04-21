@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
+import { getOrganizations, type OrganizationRow } from "../Api/Organization/getOrganizationList";
 
 type BillingStatus = "Paid" | "Trial" | "Overdue";
 type BillingAction = "Invoice" | "Send Reminder" | "Suspend";
@@ -20,48 +21,6 @@ interface PricingPlan {
   bestValue?: boolean;
 }
 
-const BILLING_ROWS: BillingRow[] = [
-  {
-    name: "FinServ Corp Ltd.",
-    plan: "Enterprise",
-    price: "₹80,000/mo",
-    nextBilling: "01 Mar 2025",
-    status: "Paid",
-    action: "Invoice",
-  },
-  {
-    name: "TechnoEdge Pvt. Ltd.",
-    plan: "Enterprise",
-    price: "₹80,000/mo",
-    nextBilling: "01 Mar 2025",
-    status: "Paid",
-    action: "Invoice",
-  },
-  {
-    name: "EduLearn Academy",
-    plan: "Pro",
-    price: "₹30,000/mo",
-    nextBilling: "01 Mar 2025",
-    status: "Paid",
-    action: "Invoice",
-  },
-  {
-    name: "HealthPlus Hospital",
-    plan: "Pro",
-    price: "₹30,000/mo",
-    nextBilling: "28 Feb 2025",
-    status: "Trial",
-    action: "Send Reminder",
-  },
-  {
-    name: "GlobalRetail Inc.",
-    plan: "Basic",
-    price: "₹10,000/mo",
-    nextBilling: "Overdue",
-    status: "Overdue",
-    action: "Suspend",
-  },
-];
 
 const PRICING_PLANS: PricingPlan[] = [
   {
@@ -285,6 +244,41 @@ function BillingTable({ rows }: { rows: BillingRow[] }) {
 
 const BillingPlan: React.FC = () => {
   const [hoveredTier, setHoveredTier] = React.useState<PricingPlan["name"] | null>(null);
+  const [organizations, setOrganizations] = useState<OrganizationRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const fetchOrganizations = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const { rows } = await getOrganizations({
+        status: "Y",
+        PageNumber: 1,
+        PageSize: 10,
+        SortOrder: "DESC",
+      });
+      setOrganizations(rows);
+    } catch (err: any) {
+      setError(err?.message || "Failed to fetch organizations");
+      setOrganizations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrganizations();
+  }, []);
+
+  const billingRows: BillingRow[] = organizations.map((org) => ({
+    name: org.OrgName || "—",
+    plan: "—",
+    price: "—",
+    nextBilling: "—",
+    status: org.Status === "Y" ? "Paid" : "Overdue",
+    action: "Invoice" as BillingAction,
+  }));
 
   return (
     <div className="container-fluid app-shell">
@@ -297,6 +291,23 @@ const BillingPlan: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Error message */}
+        {error && (
+          <div className="panel mb-3">
+            <div className="alert alert-danger mb-0">{error}</div>
+          </div>
+        )}
+
+        {/* Loading indicator */}
+        {loading && (
+          <div className="panel mb-3">
+            <div className="p-3 text-center text-secondary small">
+              <i className="bi bi-arrow-repeat spin me-2"></i>
+              Loading organizations...
+            </div>
+          </div>
+        )}
 
         <div className="panel mb-3">
           <div className="panel-head d-flex align-items-center justify-content-between p-3 flex-wrap gap-2">
@@ -324,7 +335,7 @@ const BillingPlan: React.FC = () => {
         </div>
 
         <div className="mb-3">
-          <BillingTable rows={BILLING_ROWS} />
+          <BillingTable rows={billingRows} />
         </div>
       </div>
     </div>
