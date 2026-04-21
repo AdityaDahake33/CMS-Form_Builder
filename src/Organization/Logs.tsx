@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { getAdminDashboard } from "../Api/Admin/getDashboardDetails";
 
 // ── Types
 type LogStatus = "OK" | "Pending" | "Critical" | "Info";
@@ -15,95 +16,13 @@ interface LogEntry {
     eventType: string;
 }
 
-// ── Static demo data 
-const DEMO_LOGS: LogEntry[] = [
-    {
-        id: 1,
-        time: "14:32:10",
-        icon: "bi-check2-circle",
-        iconColor: "#22c55e",
-        title: "New consent captured",
-        titleHighlight: "— CST-1004 for Survey Participation",
-        subtitle: "Platform · User ID-1351 · 192.168.1.33 · Chrome",
-        status: "OK",
-        eventType: "Consent",
-    },
-    {
-        id: 2,
-        time: "14:26:50",
-        icon: "bi-arrow-counterclockwise",
-        iconColor: "#3b82f6",
-        title: "Withdrawal request filed",
-        titleHighlight: "— CST-1055 for Patient Record Sharing",
-        subtitle: "TechnoEdge · User DP-2294 · 46.9.1.45 · Firefox",
-        status: "Pending",
-        eventType: "Withdrawal",
-    },
-    {
-        id: 3,
-        time: "13:58:44",
-        icon: "bi-exclamation-triangle-fill",
-        iconColor: "#ef4444",
-        title: "Data breach alert raised",
-        titleHighlight: "— Unauthorised access to consent DB detected",
-        subtitle: "FinServ Corp · Org-Shree · IP: 202.3.115.88",
-        status: "Critical",
-        eventType: "Security",
-    },
-    {
-        id: 4,
-        time: "11:04:53",
-        icon: "bi-building-check",
-        iconColor: "#22c55e",
-        title: "New organisation onboarded",
-        titleHighlight: "— EduLearn Academy (Pro plan)",
-        subtitle: "Platform · NJ Admin · IP: 10.0.0.5",
-        status: "OK",
-        eventType: "Organisation",
-    },
-    {
-        id: 5,
-        time: "11:00:08",
-        icon: "bi-file-earmark-check",
-        iconColor: "#22c55e",
-        title: "Consent form created",
-        titleHighlight: "— Annual Employee Survey form deployed",
-        subtitle: "TechnoEdge · Org Admin · IP: 172.16.0.3",
-        status: "OK",
-        eventType: "Form",
-    },
-    {
-        id: 6,
-        time: "11:03:39",
-        icon: "bi-shield-lock-fill",
-        iconColor: "#22c55e",
-        title: "MFA login successful",
-        titleHighlight: "— Service Provider admin login",
-        subtitle: "Platform · NJ Admin · IP: 10.0.0.1 · Chrome",
-        status: "OK",
-        eventType: "Auth",
-    },
-    {
-        id: 7,
-        time: "11:28:08",
-        icon: "bi-clock-history",
-        iconColor: "#f59e0b",
-        title: "Consent auto-expired",
-        titleHighlight: "— 12 consents expired past retention period",
-        subtitle: "GlobalRetail Org · System · Auto-process",
-        status: "Info",
-        eventType: "Consent",
-    },
-];
-
 const EVENT_TYPES = [
     "All Event Types",
-    "Consent",
+    "Action",
+    "Success",
+    "Update",
     "Withdrawal",
-    "Security",
-    "Organisation",
-    "Form",
-    "Auth",
+    "Error",
 ];
 
 // ── Badge styles 
@@ -119,10 +38,132 @@ const statusBadge = (s: LogStatus) => {
 
 // ── Component 
 const Logs: React.FC = () => {
-    const [filter, setFilter]       = useState("");
+    const [, setTick] = useState(0);
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [filter, setFilter] = useState("");
     const [eventType, setEventType] = useState("All Event Types");
 
-    const filtered = DEMO_LOGS.filter((l) => {
+    // Real-time updates every second
+    useEffect(() => {
+        const interval = setInterval(() => setTick(t => t + 1), 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Fetch logs from dashboard API
+    const fetchLogs = async () => {
+        try {
+            setLoading(true);
+            setError("");
+            const data = await getAdminDashboard();
+            console.log("Dashboard API Response:", data);
+            console.log("Activity Logs:", data?.activityLogs);
+            if (data?.activityLogs) {
+                const mappedLogs: LogEntry[] = data.activityLogs.map((item: any, index: number) => {
+                    // Use correct API field names
+                    const text = item?.activity || `Activity ${index + 1}`;
+                    const time = item?.created || "";
+                    
+                    // Parse user from activity text (extract email from parentheses)
+                    let user = "—";
+                    const emailMatch = text.match(/\(([^@]+@[^)]+)\)/);
+                    if (emailMatch) {
+                        user = emailMatch[1];
+                    } else {
+                        // Try to extract username from parentheses (non-email)
+                        const userMatch = text.match(/\(([^)]+)\)/);
+                        if (userMatch) {
+                            user = userMatch[1].trim();
+                        }
+                    }
+                    
+                    // Parse form/response number from activity text (extract numbers in parentheses)
+                    let form = "—";
+                    const numberMatch = text.match(/\((\d+)\)/);
+                    if (numberMatch) {
+                        form = `Response No. ${numberMatch[1]}`;
+                    }
+                    
+                    // Format time for display
+                    let displayTime = "—";
+                    if (time) {
+                        try {
+                            const date = new Date(time);
+                            if (!isNaN(date.getTime())) {
+                                displayTime = date.toLocaleString('en-IN', { 
+                                    hour12: false,
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                });
+                            }
+                        } catch {
+                            displayTime = time;
+                        }
+                    }
+
+                    // Determine icon and color based on activity type
+                    let icon = "bi-info-circle";
+                    let iconColor = "#3b82f6";
+                    let status: LogStatus = "Info";
+                    let eventTypeDisplay = "Action";
+
+                    const textLower = text.toLowerCase();
+                    if (textLower.includes("new") || textLower.includes("created")) {
+                        icon = "bi-check2-circle";
+                        iconColor = "#22c55e";
+                        status = "OK";
+                        eventTypeDisplay = "Success";
+                    } else if (textLower.includes("updated") || textLower.includes("update")) {
+                        icon = "bi-pencil";
+                        iconColor = "#f59e0b";
+                        status = "Pending";
+                        eventTypeDisplay = "Update";
+                    } else if (textLower.includes("consent removal")) {
+                        icon = "bi-arrow-counterclockwise";
+                        iconColor = "#3b82f6";
+                        status = "Pending";
+                        eventTypeDisplay = "Withdrawal";
+                    } else if (textLower.includes("action taken")) {
+                        icon = "bi-check-circle";
+                        iconColor = "#22c55e";
+                        status = "OK";
+                        eventTypeDisplay = "Action";
+                    }
+
+                    return {
+                        id: index + 1,
+                        time: displayTime,
+                        icon,
+                        iconColor,
+                        title: text,
+                        titleHighlight: form !== "—" ? `— ${form}` : "",
+                        subtitle: user !== "—" ? `User: ${user}` : "",
+                        status,
+                        eventType: eventTypeDisplay,
+                    };
+                });
+                setLogs(mappedLogs);
+            } else {
+                setLogs([]);
+            }
+        } catch (err: any) {
+            setError(err?.message || "Failed to fetch logs");
+            setLogs([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchLogs();
+    }, []);
+
+    const filtered = logs.filter((l) => {
         const q = filter.trim().toLowerCase();
         const matchText =
             q === "" ||
@@ -149,6 +190,23 @@ const Logs: React.FC = () => {
                     </div>
                 </div>
 
+                {/* ── Error message ── */}
+                {error && (
+                    <div className="panel mb-3">
+                        <div className="alert alert-danger mb-0">{error}</div>
+                    </div>
+                )}
+
+                {/* ── Loading indicator ── */}
+                {loading && (
+                    <div className="panel mb-3">
+                        <div className="p-3 text-center text-secondary small">
+                            <i className="bi bi-arrow-repeat spin me-2"></i>
+                            Loading logs...
+                        </div>
+                    </div>
+                )}
+
 
                 {/* ── Info chip bar ── */}
                 <div className="panel mb-3">
@@ -171,7 +229,7 @@ const Logs: React.FC = () => {
                             />
                             <input
                                 className="form-control ps-4"
-                                placeholder="Filter by event type, actor or org..."
+                                placeholder="Filter by event type, user or form..."
                                 value={filter}
                                 onChange={(e) => setFilter(e.target.value)}
                             />
@@ -188,6 +246,14 @@ const Logs: React.FC = () => {
                             ))}
                         </select>
 
+                        <button 
+                            className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1 text-nowrap"
+                            onClick={() => fetchLogs()}
+                        >
+                            <i className="bi bi-arrow-clockwise" />
+                            Refresh
+                        </button>
+
                         <button className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1 text-nowrap">
                             <i className="bi bi-download" />
                             Export Logs
@@ -197,7 +263,12 @@ const Logs: React.FC = () => {
 
                 {/* ── Log entries ── */}
                 <div className="d-flex flex-column gap-2 mb-4">
-                    {filtered.length === 0 && (
+                    {!loading && logs.length === 0 && (
+                        <div className="panel p-4 text-center text-secondary small">
+                            No log entries available.
+                        </div>
+                    )}
+                    {filtered.length === 0 && logs.length > 0 && (
                         <div className="panel p-4 text-center text-secondary small">
                             No log entries match your filter.
                         </div>
