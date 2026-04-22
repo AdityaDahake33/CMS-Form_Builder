@@ -319,7 +319,12 @@ export default function AdminLogin({ onForgotPassword }: Props) {
             // ✅ Persist to ProjectContext + localStorage
             loginAdmin(data);
 
-            
+            // AFTER loginAdmin(data);
+
+            // localStorage.setItem("ORGCODE", orgCode);
+
+            // // ✅ ADD THIS LINE (CRITICAL FIX)
+            // localStorage.setItem("ORGNAME", data.orgName || "");
 
             setPopupType("success");
             setPopupMessage("Login successful! Redirecting...");
